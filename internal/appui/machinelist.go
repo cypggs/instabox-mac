@@ -207,7 +207,6 @@ func (l *MachineList) machineRow(c *ui.Context, t *ui.Theme, m instabox.Machine)
 
 func (l *MachineList) prefsView(c *ui.Context, t *ui.Theme) {
 	l.mu.Lock()
-	key := l.keyEdited
 	env := l.apiKeyEnv
 	l.mu.Unlock()
 	mapping := l.prefs.GetMapping()
@@ -216,13 +215,17 @@ func (l *MachineList) prefsView(c *ui.Context, t *ui.Theme) {
 			ui.Text(c, "设置").Bold()
 			ui.Text(c, "API Key（存于 macOS 钥匙串；也可通过 INSTABOX_API_KEY 环境变量提供）").FontSize(12).TextColor(t.TextMuted)
 			ui.Row(c).Gap(8).Children(func() {
-				ui.TextInput(c.Key("apikey"), &key).Password().FillWidth().Placeholder("ibk_…")
+				// 必须直接绑定持久字段：输入框每帧用 *string 反向同步内部缓冲，
+				// 绑定局部副本会导致每帧重置、无法输入。
+				ui.TextInput(c.Key("apikey"), &l.keyEdited).Password().FillWidth().Placeholder("ibk_…")
 				if ui.Button(c.Key("savekey"), "保存").Clicked() {
-					if err := SaveAPIKey(key); err != nil {
+					if err := SaveAPIKey(l.keyEdited); err != nil {
 						l.mappingMsg = "保存失败: " + err.Error()
 					} else {
 						l.mappingMsg = "已保存到钥匙串，重启应用生效"
-						l.apiKey = key
+						l.mu.Lock()
+						l.apiKey = l.keyEdited
+						l.mu.Unlock()
 					}
 				}
 			})
