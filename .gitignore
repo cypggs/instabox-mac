@@ -1,0 +1,4 @@
+dist/
+*.dmg
+.DS_Store
+/tmp/
