@@ -63,6 +63,10 @@ func DialWebSocket(ctx context.Context, url string, header map[string]string) (T
 		}
 		return nil, fmt.Errorf("rfb: websocket dial %s: %w", url, err)
 	}
+	// coder/websocket 默认 32KB 读上限太小：单条更新消息（wayvnc 会合并
+	// 多个请求的响应）可轻易超过。Instabox 中继自己会在 ~64KB 丢弃过大
+	// 消息（连接随之失效），应用层已用小块请求规避，这里给足余量。
+	conn.SetReadLimit(16 << 20)
 	return NewWSTransport(conn), nil
 }
 

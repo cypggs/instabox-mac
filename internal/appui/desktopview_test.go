@@ -48,12 +48,10 @@ func TestToRemoteCoordsFill(t *testing.T) {
 
 func TestToRemoteCoords100(t *testing.T) {
 	d := newTestDesktop(906, 742)
-	d.scale = Scale100 // 原始大小居中：偏移 ((800-906)/2, (600-742)/2) = (-53, -71)
-	// 点击窗口 (400,300) → 本地 (400,300)；相对 dr 原点：fx=400-(-53)=453 超出? dr.W=906
-	// 400-(-53)=453 < 906 ✓；fy=300-(-71)=371 <742 ✓
+	d.scale = Scale100 // 远端大于可视区 → 左上角对齐，dr 原点 = (0,0)
 	x, y, ok := d.toRemoteCoords(400, 300)
-	if !ok || x != 453 || y != 371 {
-		t.Fatalf("got (%d,%d,%v)", x, y, ok)
+	if !ok || x != 400 || y != 300 {
+		t.Fatalf("got (%d,%d,%v), want (400,300,true)", x, y, ok)
 	}
 	// 远端比窗口小时原始区域外必须拒绝：换 400x300 远端，窗口 (10,10) 在 1:1 区外
 	d2 := newTestDesktop(400, 300)

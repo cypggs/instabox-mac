@@ -325,6 +325,8 @@ func (d *DesktopView) drawDesktop(p *ui.Painter, r ui.Rect) {
 }
 
 // destRect 计算帧缓冲在显示区域中的目标矩形。
+// Scale100 时若远端大于可视区，左上角对齐（居中会让上下都跑到可视区外，
+// 用户只能看到白边，像是"空白"）。
 func (d *DesktopView) destRect(r ui.Rect) ui.Rect {
 	d.mu.Lock()
 	w, h := d.fbW, d.fbH
@@ -333,13 +335,19 @@ func (d *DesktopView) destRect(r ui.Rect) ui.Rect {
 	if w == 0 || h == 0 {
 		return r
 	}
-	switch mode {
-	case Scale100:
-		return ui.Rect{X: r.X + (r.W-float32(w))/2, Y: r.Y + (r.H-float32(h))/2, W: float32(w), H: float32(h)}
-	default:
-		// Fit/Fill 由 Painter 的 Contain/Cover 处理，直接用整个区域
-		return r
+	if mode == Scale100 {
+		x := r.X + (r.W-float32(w))/2
+		y := r.Y + (r.H-float32(h))/2
+		if x < r.X {
+			x = r.X
+		}
+		if y < r.Y {
+			y = r.Y
+		}
+		return ui.Rect{X: x, Y: y, W: float32(w), H: float32(h)}
 	}
+	// Fit/Fill 由 Painter 的 Contain/Cover 处理，直接用整个区域
+	return r
 }
 
 // toRemoteCoords 把元素内 DIP 坐标映射为帧缓冲像素坐标。
@@ -355,7 +363,7 @@ func (d *DesktopView) toRemoteCoords(x, y float32) (uint16, uint16, bool) {
 	var fx, fy float32
 	switch mode {
 	case Scale100:
-		dr := ui.Rect{X: r.X + (r.W-float32(w))/2, Y: r.Y + (r.H-float32(h))/2, W: float32(w), H: float32(h)}
+		dr := d.destRect(r)
 		fx = x - dr.X
 		fy = y - dr.Y
 		if fx < 0 || fy < 0 || fx >= dr.W || fy >= dr.H {
