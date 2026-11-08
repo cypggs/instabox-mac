@@ -201,7 +201,7 @@ func (a *app) setGrab(enable bool) {
 			grab.RequestAccess() // 触发系统授权弹窗
 			if !grab.Available() {
 				if d != nil {
-					d.GrabMessage = "键盘捕获需要辅助功能权限：系统设置 → 隐私与安全性 → 辅助功能，勾选 Instabox 后重试。"
+					d.GrabMessage = "输入捕获需要辅助功能权限：系统设置 → 隐私与安全性 → 辅助功能，勾选 Instabox 后重试。"
 				}
 				grab.OpenSystemPrefs()
 				if a.win != nil {
@@ -215,7 +215,7 @@ func (a *app) setGrab(enable bool) {
 		}
 		if err := a.grabMgr.Start(a.onGrabEvent); err != nil {
 			if d != nil {
-				d.GrabMessage = "键盘捕获启动失败: " + err.Error()
+				d.GrabMessage = "输入捕获启动失败: " + err.Error()
 			}
 			if a.win != nil {
 				a.win.Invalidate()
@@ -223,6 +223,7 @@ func (a *app) setGrab(enable bool) {
 			return
 		}
 		a.grabOn = true
+		grab.HideCursor() // 捕获输入：隐藏本机光标，只显示远程光标
 		if d != nil {
 			d.GrabMessage = ""
 		}
@@ -231,6 +232,7 @@ func (a *app) setGrab(enable bool) {
 			a.grabMgr.Stop()
 		}
 		a.grabOn = false
+		grab.ShowCursorAll()
 		a.releaseKeys()
 	}
 
@@ -297,9 +299,10 @@ func (a *app) releaseKeys() {
 }
 
 // onBlur 失焦时释放全部按键并退出捕获（用户已切到别的应用，
-// 继续吞键会让别的应用打不了字）。
+// 继续吞键会让别的应用打不了字；光标也要立刻恢复可见）。
 func (a *app) onBlur() {
 	a.releaseKeys()
+	grab.ShowCursorAll()
 	if a.grabOn {
 		a.win.Update(func() { a.setGrab(false) })
 	}
@@ -351,6 +354,34 @@ func countBits(v uint64) int {
 
 // --- 菜单 ---
 
+// keyHIDW 是 W 键的 USB HID usage（Cmd+W 转发用）。
+const keyHIDW = 0x1A
+
+// onCloseWindow 处理"关闭窗口"（Cmd+W）：桌面会话进行中时把 Cmd+W
+// 转发给远程（按用户修饰键映射，默认 Cmd→Super），否则正常关闭窗口。
+// 这样 Hyprland/Omarchy 里 Super+W 关闭软件的操作不会被 macOS 抢去退出本应用。
+func (a *app) onCloseWindow() {
+	a.mu.Lock()
+	s, tr := a.session, a.translator
+	a.mu.Unlock()
+	if s != nil && tr != nil && s.Conn() != nil &&
+		(s.State() == appui.StateConnected || s.State() == appui.StateReconnecting) {
+		var evs []keys.Event
+		evs = append(evs, tr.KeyChange(keyHIDLeftSuper, true, keys.SideSuperLeft, 0, false)...)
+		evs = append(evs, tr.KeyChange(keyHIDW, true, keys.SideNone, 0, false)...)
+		evs = append(evs, tr.KeyChange(keyHIDW, false, keys.SideNone, 0, false)...)
+		evs = append(evs, tr.KeyChange(keyHIDLeftSuper, false, keys.SideSuperLeft, 0, false)...)
+		conn := s.Conn()
+		for _, e := range evs {
+			_ = conn.SendKey(e.Keysym, e.Down)
+		}
+		return
+	}
+	if a.win != nil {
+		a.win.Close()
+	}
+}
+
 func (a *app) buildMenu() {
 	mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{
 		{Role: mygo.RoleAppMenu},
@@ -364,7 +395,9 @@ func (a *app) buildMenu() {
 				}
 			}},
 			mygo.Separator(),
-			{Role: mygo.RoleClose},
+			{Label: "关闭窗口", Accelerator: "CmdOrCtrl+W", Click: func(*mygo.MenuItem, *mygo.Window) {
+				a.onCloseWindow()
+			}},
 		}},
 		{Role: mygo.RoleEditMenu},
 		{Role: mygo.RoleViewMenu},

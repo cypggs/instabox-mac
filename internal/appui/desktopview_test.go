@@ -64,8 +64,46 @@ func TestToRemoteCoords100(t *testing.T) {
 	}
 }
 
-func TestConvertModsAndSide(t *testing.T) {
-	var m ui.Modifiers
+// TestToScreenCoordsRoundtrip 验证 toScreenCoords 与 toRemoteCoords 互逆：
+// 光标的绘制位置必须和点击发送的位置是同一个点（"指哪点哪"）。
+func TestToScreenCoordsRoundtrip(t *testing.T) {
+	abs := func(v float32) float32 {
+		if v < 0 {
+			return -v
+		}
+		return v
+	}
+	points := [][2]float32{{400, 300}, {33, 41}, {700, 500}, {100, 550}}
+	for _, mode := range []ScaleMode{ScaleFit, ScaleFill, Scale100} {
+		d := newTestDesktop(906, 742)
+		d.scale = mode
+		for _, p := range points {
+			rx, ry, ok := d.toRemoteCoords(p[0], p[1])
+			if !ok {
+				continue // 该点在有效区外（如 Scale100 越界），跳过
+			}
+			sx, sy, _ := d.toScreenCoords(float32(rx), float32(ry))
+			if abs(sx-p[0]) > 1.5 || abs(sy-p[1]) > 1.5 {
+				t.Fatalf("mode=%v point=(%v,%v): roundtrip (%v,%v)", mode, p[0], p[1], sx, sy)
+			}
+		}
+	}
+	// Scale100 远端小于窗口（居中场景）也要互逆
+	d := newTestDesktop(400, 300)
+	d.scale = Scale100 // dr 偏移 (200,150)
+	for _, p := range points {
+		rx, ry, ok := d.toRemoteCoords(p[0], p[1])
+		if !ok {
+			continue
+		}
+		sx, sy, _ := d.toScreenCoords(float32(rx), float32(ry))
+		if abs(sx-p[0]) > 1.5 || abs(sy-p[1]) > 1.5 {
+			t.Fatalf("small Scale100 point=(%v,%v): roundtrip (%v,%v)", p[0], p[1], sx, sy)
+		}
+	}
+}
+
+func TestConvertModsAndSide(t *testing.T) {	var m ui.Modifiers
 	m |= ui.Shift | ui.Ctrl | ui.Alt | ui.Super
 	km := convertMods(m)
 	if km != 0x0F {

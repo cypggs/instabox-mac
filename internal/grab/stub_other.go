@@ -27,3 +27,8 @@ func RequestAccess() bool { return false }
 
 // OpenSystemPrefs 是 no-op。
 func OpenSystemPrefs() {}
+
+// HideCursor/ShowCursor/ShowCursorAll 是 no-op。
+func HideCursor()          {}
+func ShowCursor()         {}
+func ShowCursorAll()      {}

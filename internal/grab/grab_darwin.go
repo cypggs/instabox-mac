@@ -41,6 +41,8 @@ var (
 		cgEventTapEnable            uintptr // CGEventTapEnable
 		cgEventGetIntegerValueField uintptr // CGEventGetIntegerValueField
 		cgEventGetFlags             uintptr // CGEventGetFlags
+		cgDisplayHideCursor         uintptr // CGDisplayHideCursor
+		cgDisplayShowCursor         uintptr // CGDisplayShowCursor
 
 		// CoreFoundation
 		cfMachPortCreateRunLoopSource uintptr // CFMachPortCreateRunLoopSource
@@ -129,6 +131,8 @@ func loadSyms() error {
 		{libCG, "CGEventTapEnable", &syms.cgEventTapEnable, false},
 		{libCG, "CGEventGetIntegerValueField", &syms.cgEventGetIntegerValueField, false},
 		{libCG, "CGEventGetFlags", &syms.cgEventGetFlags, false},
+		{libCG, "CGDisplayHideCursor", &syms.cgDisplayHideCursor, false},
+		{libCG, "CGDisplayShowCursor", &syms.cgDisplayShowCursor, false},
 		{libCF, "CFMachPortCreateRunLoopSource", &syms.cfMachPortCreateRunLoopSource, false},
 		{libCF, "CFRunLoopGetCurrent", &syms.cfRunLoopGetCurrent, false},
 		{libCF, "CFRunLoopAddSource", &syms.cfRunLoopAddSource, false},
@@ -195,6 +199,56 @@ func RequestAccess() bool {
 func OpenSystemPrefs() {
 	// 系统 URL scheme，由 macOS 的 `open` 命令处理。
 	_ = exec.Command("open", systemPrefsURL).Run()
+}
+
+// --- 光标隐藏（捕获输入模式用） ---
+//
+// CGDisplayHideCursor/ShowCursor 是应用级计数：隐藏几次就要显示几次。
+// 这里用计数器兜底，ShowCursorAll 用于失焦/异常路径的强制恢复。
+
+var cursorMu sync.Mutex
+var cursorHideCount int
+
+// HideCursor 隐藏本机光标。不需要辅助功能权限。
+func HideCursor() {
+	if load() != nil {
+		return
+	}
+	purego.SyscallN(syms.cgDisplayHideCursor, 0) // kCGDirectMainDisplay = 0
+	cursorMu.Lock()
+	cursorHideCount++
+	cursorMu.Unlock()
+}
+
+// ShowCursor 恢复一次隐藏；计数为零时是 no-op。
+func ShowCursor() {
+	cursorMu.Lock()
+	if cursorHideCount == 0 {
+		cursorMu.Unlock()
+		return
+	}
+	cursorHideCount--
+	cursorMu.Unlock()
+	if load() != nil {
+		return
+	}
+	purego.SyscallN(syms.cgDisplayShowCursor, 0)
+}
+
+// ShowCursorAll 强制恢复光标（把欠的计数全部还清）。
+func ShowCursorAll() {
+	for {
+		cursorMu.Lock()
+		if cursorHideCount == 0 {
+			cursorMu.Unlock()
+			return
+		}
+		cursorHideCount--
+		cursorMu.Unlock()
+		if load() == nil {
+			purego.SyscallN(syms.cgDisplayShowCursor, 0)
+		}
+	}
 }
 
 // Manager 管理一个 CGEventTap 的生命周期。

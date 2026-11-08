@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"image"
+	"image/color"
 	"sync"
 	"time"
 
@@ -251,9 +252,9 @@ func (d *DesktopView) toolbar(c *ui.Context, t *ui.Theme) {
 
 func (d *DesktopView) grabLabel() string {
 	if d.GrabActive {
-		return "⏏ 释放键盘 (Ctrl+Opt+G)"
+		return "⏏ 释放输入 (Ctrl+Opt+G)"
 	}
-	return "捕获键盘"
+	return "捕获输入"
 }
 
 func (d *DesktopView) statusBar(c *ui.Context, t *ui.Theme) {
@@ -282,7 +283,7 @@ func (d *DesktopView) statusBar(c *ui.Context, t *ui.Theme) {
 				}
 			}
 			if d.GrabActive {
-				ui.Text(c, "⌨️ 键盘已捕获 — 按键发送给远程；按 Ctrl+Option+G 或点这里释放").FontSize(12).TextColor(t.Success)
+				ui.Text(c, "⌨️ 输入已捕获 — 键盘鼠标都发给远程；按 Ctrl+Option+G 或点这里释放").FontSize(12).TextColor(t.Success)
 				if ui.Button(c.Key("ungrab"), "释放").Clicked() {
 					if d.OnGrabRequest != nil {
 						d.OnGrabRequest(false)
@@ -311,16 +312,19 @@ func (d *DesktopView) drawDesktop(p *ui.Painter, r ui.Rect) {
 	}
 	p.Image(bm, dr, fit)
 
-	// 远端光标（收到 Cursor 伪编码时绘制；否则画本地准星提示位置）
+	// 远端光标：用与点击完全一致的映射绘制（toScreenCoords）。
+	// 捕获模式下若远端未给光标形状，画备用箭头，保证只有一枚光标且位置=点击位置。
 	d.mu.Lock()
 	cb, ch, ci := d.cursor, d.cursorHot, d.cursorImg
 	ptr := d.ptr
 	d.mu.Unlock()
 	if cb != nil && ci != nil {
-		scale := dr.W / float32(w)
-		x := dr.X + float32(ptr.X)*scale - float32(ch.X)*scale
-		y := dr.Y + float32(ptr.Y)*scale - float32(ch.Y)*scale
-		p.Image(cb, ui.Rect{X: x, Y: y, W: float32(ci.Bounds().Dx()) * scale, H: float32(ci.Bounds().Dy()) * scale}, ui.FillBox)
+		sx, sy, s := d.toScreenCoords(float32(ptr.X), float32(ptr.Y))
+		p.Image(cb, ui.Rect{X: sx - float32(ch.X)*s, Y: sy - float32(ch.Y)*s,
+			W: float32(ci.Bounds().Dx()) * s, H: float32(ci.Bounds().Dy()) * s}, ui.FillBox)
+	} else if d.GrabActive {
+		sx, sy, _ := d.toScreenCoords(float32(ptr.X), float32(ptr.Y))
+		p.Image(fallbackCursor(), ui.Rect{X: sx - 3, Y: sy, W: 16, H: 22}, ui.FillBox)
 	}
 }
 
@@ -351,8 +355,7 @@ func (d *DesktopView) destRect(r ui.Rect) ui.Rect {
 }
 
 // toRemoteCoords 把元素内 DIP 坐标映射为帧缓冲像素坐标。
-func (d *DesktopView) toRemoteCoords(x, y float32) (uint16, uint16, bool) {
-	d.mu.Lock()
+func (d *DesktopView) toRemoteCoords(x, y float32) (uint16, uint16, bool) {	d.mu.Lock()
 	r := d.viewRect
 	w, h := d.fbW, d.fbH
 	mode := d.scale
@@ -389,6 +392,33 @@ func (d *DesktopView) toRemoteCoords(x, y float32) (uint16, uint16, bool) {
 		return 0, 0, false
 	}
 	return uint16(fx), uint16(fy), true
+}
+
+// toScreenCoords 是 toRemoteCoords 的逆映射：帧缓冲像素 → 元素内 DIP。
+// 画远程光标必须用与点击完全一致的映射，否则"光标看着在这、点击落在那"。
+func (d *DesktopView) toScreenCoords(fx, fy float32) (float32, float32, float32) {
+	d.mu.Lock()
+	r := d.viewRect
+	w, h := d.fbW, d.fbH
+	mode := d.scale
+	d.mu.Unlock()
+	if w == 0 || h == 0 {
+		return 0, 0, 1
+	}
+	var s float32
+	switch mode {
+	case Scale100:
+		dr := d.destRect(r)
+		return dr.X + fx, dr.Y + fy, 1
+	case ScaleFill:
+		s = max(r.W/float32(w), r.H/float32(h))
+		drw, drh := float32(w)*s, float32(h)*s
+		return r.X - (drw-r.W)/2 + fx*s, r.Y - (drh-r.H)/2 + fy*s, s
+	default: // Fit / Contain
+		s = min(r.W/float32(w), r.H/float32(h))
+		drw, drh := float32(w)*s, float32(h)*s
+		return r.X + (r.W-drw)/2 + fx*s, r.Y + (r.H-drh)/2 + fy*s, s
+	}
 }
 
 // --- 输入 ---
@@ -529,6 +559,38 @@ func sideOf(hid uint32) keys.ModSide {
 	}
 	return keys.SideNone
 }
+
+// fallbackCursor 是捕获模式下的备用箭头光标（远端未发送光标形状时用）。
+var fallbackCursor = sync.OnceValue(func() *ui.Bitmap {
+	img := image.NewRGBA(image.Rect(0, 0, 16, 22))
+	black := color.RGBA{20, 20, 20, 255}
+	white := color.RGBA{245, 245, 245, 255}
+	// 经典箭头多边形（含描边）：(0,0)→(0,16)→(4,11)→(7,17)→(9,16)→(6,10)→(11,10)
+	outer := [][2]float64{{0, 0}, {0, 16}, {4, 11}, {7, 17}, {9, 16}, {6, 10}, {11, 10}}
+	inner := [][2]float64{{1, 1}, {1, 13.5}, {4.2, 9.8}, {7.2, 15.6}, {7.8, 15.2}, {4.8, 9.4}, {9.8, 9.4}}
+	inPoly := func(p [2]float64, poly [][2]float64) bool {
+		inside := false
+		for i, j := 0, len(poly)-1; i < len(poly); j, i = i, i+1 {
+			if (poly[i][1] > p[1]) != (poly[j][1] > p[1]) &&
+				p[0] < (poly[j][0]-poly[i][0])*(p[1]-poly[i][1])/(poly[j][1]-poly[i][1])+poly[i][0] {
+				inside = !inside
+			}
+		}
+		return inside
+	}
+	for y := 0; y < 22; y++ {
+		for x := 0; x < 16; x++ {
+			p := [2]float64{float64(x) + 0.5, float64(y) + 0.5}
+			switch {
+			case inPoly(p, inner):
+				img.SetRGBA(x, y, white)
+			case inPoly(p, outer):
+				img.SetRGBA(x, y, black)
+			}
+		}
+	}
+	return ui.NewBitmap(img)
+})
 
 // CursorChanged 是 rfb Cursor 伪编码回调入口（main 装配）。
 func (d *DesktopView) CursorChanged(hotX, hotY uint16, img *image.RGBA) {
