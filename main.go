@@ -89,6 +89,18 @@ func main() {
 				for _, m := range ms {
 					if m.State == "running" || m.State == "suspended" {
 						a.connect(m)
+						// 调试：INSTABOX_AUTOGRAB=1 时在连接建立后自动开捕获输入。
+						if os.Getenv("INSTABOX_AUTOGRAB") == "1" {
+							go func(s *appui.Session) {
+								for i := 0; i < 60; i++ {
+									time.Sleep(500 * time.Millisecond)
+									if s.State() == appui.StateConnected {
+										a.win.Update(func() { a.setGrab(true) })
+										return
+									}
+								}
+							}(a.currentSession())
+						}
 						return
 					}
 				}
@@ -201,7 +213,7 @@ func (a *app) setGrab(enable bool) {
 			grab.RequestAccess() // 触发系统授权弹窗
 			if !grab.Available() {
 				if d != nil {
-					d.GrabMessage = "输入捕获需要辅助功能权限：系统设置 → 隐私与安全性 → 辅助功能，勾选 Instabox 后重试。"
+					d.GrabMessage = "输入捕获需要辅助功能权限：系统设置 → 隐私与安全性 → 辅助功能 勾选 Instabox，然后重启应用再试。"
 				}
 				grab.OpenSystemPrefs()
 				if a.win != nil {

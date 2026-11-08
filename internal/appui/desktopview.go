@@ -313,7 +313,8 @@ func (d *DesktopView) drawDesktop(p *ui.Painter, r ui.Rect) {
 	p.Image(bm, dr, fit)
 
 	// 远端光标：用与点击完全一致的映射绘制（toScreenCoords）。
-	// 捕获模式下若远端未给光标形状，画备用箭头，保证只有一枚光标且位置=点击位置。
+	// 捕获模式下若远端未给光标形状，画一个明显的准星标记（与 macOS 箭头
+	// 明显不同，避免用户误以为本机光标没隐藏）。
 	d.mu.Lock()
 	cb, ch, ci := d.cursor, d.cursorHot, d.cursorImg
 	ptr := d.ptr
@@ -324,7 +325,7 @@ func (d *DesktopView) drawDesktop(p *ui.Painter, r ui.Rect) {
 			W: float32(ci.Bounds().Dx()) * s, H: float32(ci.Bounds().Dy()) * s}, ui.FillBox)
 	} else if d.GrabActive {
 		sx, sy, _ := d.toScreenCoords(float32(ptr.X), float32(ptr.Y))
-		p.Image(fallbackCursor(), ui.Rect{X: sx - 3, Y: sy, W: 16, H: 22}, ui.FillBox)
+		p.Image(captureReticle(), ui.Rect{X: sx - 11, Y: sy - 11, W: 22, H: 22}, ui.FillBox)
 	}
 }
 
@@ -560,37 +561,35 @@ func sideOf(hid uint32) keys.ModSide {
 	return keys.SideNone
 }
 
-// fallbackCursor 是捕获模式下的备用箭头光标（远端未发送光标形状时用）。
-var fallbackCursor = sync.OnceValue(func() *ui.Bitmap {
-	img := image.NewRGBA(image.Rect(0, 0, 16, 22))
-	black := color.RGBA{20, 20, 20, 255}
-	white := color.RGBA{245, 245, 245, 255}
-	// 经典箭头多边形（含描边）：(0,0)→(0,16)→(4,11)→(7,17)→(9,16)→(6,10)→(11,10)
-	outer := [][2]float64{{0, 0}, {0, 16}, {4, 11}, {7, 17}, {9, 16}, {6, 10}, {11, 10}}
-	inner := [][2]float64{{1, 1}, {1, 13.5}, {4.2, 9.8}, {7.2, 15.6}, {7.8, 15.2}, {4.8, 9.4}, {9.8, 9.4}}
-	inPoly := func(p [2]float64, poly [][2]float64) bool {
-		inside := false
-		for i, j := 0, len(poly)-1; i < len(poly); j, i = i, i+1 {
-			if (poly[i][1] > p[1]) != (poly[j][1] > p[1]) &&
-				p[0] < (poly[j][0]-poly[i][0])*(p[1]-poly[i][1])/(poly[j][1]-poly[i][1])+poly[i][0] {
-				inside = !inside
-			}
-		}
-		return inside
-	}
-	for y := 0; y < 22; y++ {
-		for x := 0; x < 16; x++ {
-			p := [2]float64{float64(x) + 0.5, float64(y) + 0.5}
-			switch {
-			case inPoly(p, inner):
-				img.SetRGBA(x, y, white)
-			case inPoly(p, outer):
-				img.SetRGBA(x, y, black)
+// captureReticle 是捕获模式下远端未给光标形状时绘制的准星：
+// 绿色圆环 + 中心点 + 十字线，刻意做得与 macOS 箭头完全不同，
+// 让用户一眼能分辨"这是远程光标，本机光标已隐藏"。
+var captureReticle = sync.OnceValue(func() *ui.Bitmap {
+	const sz = 22
+	img := image.NewRGBA(image.Rect(0, 0, sz, sz))
+	green := color.RGBA{80, 220, 120, 255}
+	cx, cy := sz/2, sz/2
+	for y := 0; y < sz; y++ {
+		for x := 0; x < sz; x++ {
+			dx, dy := x-cx, y-cy
+			r2 := dx*dx + dy*dy
+			ring := r2 >= 7*7 && r2 <= 9*9 // 圆环 r=8
+			arm := (abs(dx) <= 0 && abs(dy) >= 11) || (abs(dy) <= 0 && abs(dx) >= 11) ||
+				(r2 <= 1) // 十字线 + 中心点
+			if ring || arm {
+				img.SetRGBA(x, y, green)
 			}
 		}
 	}
 	return ui.NewBitmap(img)
 })
+
+func abs(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
 
 // CursorChanged 是 rfb Cursor 伪编码回调入口（main 装配）。
 func (d *DesktopView) CursorChanged(hotX, hotY uint16, img *image.RGBA) {

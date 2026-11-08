@@ -16,7 +16,7 @@
 - **Cmd+W 转发**：桌面会话中按 Cmd+W 不会退出本应用，而是按修饰键映射（默认 Cmd→Super）发给远程，用于关闭远程系统里的软件；不在会话中时行为与 macOS 惯例一致（关闭窗口）
 - 鼠标：移动 / 左右中键 / 滚轮 / 触控板精确滚动；缩放模式：适应窗口 / 填满 / 原始大小；Retina 自动处理
 - 断线自动重连（指数退避 1s→15s），状态栏显示错误与"重连"按钮
-- API Key 存 macOS 钥匙串（`INSTABOX_API_KEY` 环境变量作为回退），绝不写入磁盘源码或日志
+- API Key 存 macOS 钥匙串（`INSTABOX_API_KEY` 环境变量优先，可覆盖钥匙串），绝不写入磁盘源码或日志
 
 ## 安装与构建
 
@@ -25,7 +25,7 @@
 ```bash
 git clone https://github.com/cypggs/instabox-mac.git
 cd instabox-mac
-go tool mygo build        # 产出 dist/darwin-arm64/instaboxmac.app 与 .dmg
+go tool mygo build        # 产出 dist/darwin-arm64/Instabox.app 与 instaboxmac-<版本>-arm64.dmg
 ```
 
 开发运行：

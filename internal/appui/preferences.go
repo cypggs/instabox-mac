@@ -83,14 +83,15 @@ func (p *Preferences) SetMapping(m keys.Mapping) error {
 	return p.Save()
 }
 
-// LoadAPIKey 读 API key：优先 Keychain，回退 INSTABOX_API_KEY 环境变量。
+// LoadAPIKey 读 API key：INSTABOX_API_KEY 环境变量优先（覆盖钥匙串，
+// 便于调试与免弹窗启动），否则读 Keychain。
 // 返回值同时标记是否来自环境变量（UI 提示用）。
 func LoadAPIKey() (key string, fromEnv bool) {
-	if b, err := mygo.Secrets.Get(secretAPIKey); err == nil && len(b) > 0 {
-		return string(b), false
-	}
 	if v := os.Getenv("INSTABOX_API_KEY"); v != "" {
 		return v, true
+	}
+	if b, err := mygo.Secrets.Get(secretAPIKey); err == nil && len(b) > 0 {
+		return string(b), false
 	}
 	return "", false
 }
