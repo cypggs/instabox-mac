@@ -2,7 +2,7 @@
   "name": "Instabox",
   "slug": "instaboxmac",
   "identifier": "com.cypggs.instaboxmac",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "license": "MIT",
   "copyright": "Copyright © 2026 cypggs",
   "icon": "resources/icon.png"

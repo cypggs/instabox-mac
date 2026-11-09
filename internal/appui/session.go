@@ -375,5 +375,14 @@ func (s *Session) Close() {
 	if conn != nil {
 		conn.Close()
 	}
-	s.setState(StateDisconnected, nil)
+	// 直接置状态而非走 setState：setState 对 closed 的守卫会让
+	// Close 后的状态翻转被丢弃（状态永远停在已连接，视图切不回列表）。
+	s.mu.Lock()
+	s.state = StateDisconnected
+	s.lastErr = nil
+	cb := s.OnState
+	s.mu.Unlock()
+	if cb != nil {
+		cb(StateDisconnected, nil)
+	}
 }
